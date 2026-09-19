@@ -1,4 +1,4 @@
-# Mac / Linux：最短 Redis SDK 验收
+﻿# Mac / Linux：最短 Redis SDK 验收
 
 状态：`PENDING_MANUAL_VERIFICATION`。本次无法远程访问 Mac，Windows 自测不能代替 Mac 实机结果。无需新增远程部署服务。
 
@@ -74,4 +74,4 @@ finally:
 
 SDK 会先投递一次初始快照。只有后续真实增量回调才能证明跨机器实时推送；交易时段再运行验收脚本，检查 `background_callbacks > 0` 和 `stream=RECEIVED`。休市没有推送时保留 `PENDING_TRADING_SESSION`，不能把初始快照当实时推送验证通过。
 
-若 Redis 不通，先检查 Windows Docker/容器、LAN 地址是否变化、两机是否同一受信子网、Windows 网卡是否 Private、防火墙规则；不要关闭防火墙或改成公网开放。Redis 通而 RPC ping 超时，检查大 QMT 是否登录、策略是否运行、双方账号配置是否一致。可回传已脱敏的 `mac-results.json`（不包含账号/资产数值/密码），仍不要公开客户端配置。
+若 Redis 不通，先检查 Windows 的 BigQmtGalaxyRedis 服务、LAN 地址是否变化、两机是否同一受信子网、Windows 网卡是否 Private、防火墙规则；不要关闭防火墙或改成公网开放。Redis 通而 RPC ping 超时，检查大 QMT 是否登录、策略是否运行、双方账号配置是否一致。可回传已脱敏的 `mac-results.json`（不包含账号/资产数值/密码），仍不要公开客户端配置。

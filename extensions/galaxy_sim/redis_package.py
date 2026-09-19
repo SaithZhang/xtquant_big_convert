@@ -40,8 +40,8 @@ def generate(host=None):
     account = load_profile()["account_id"]
     # No disk persistence: this instance is transport, not a business database.
     (PRIVATE / "redis.conf").write_text(
-        'bind 0.0.0.0\nprotected-mode yes\nport 6379\nsave ""\nappendonly no\n'
-        'requirepass ' + settings["password"] + '\n', encoding="ascii")
+        'bind 127.0.0.1 {host}\nprotected-mode yes\nport {port}\nsave ""\nappendonly no\n'
+        'requirepass {password}\n'.format(**settings), encoding="ascii")
     for name, host_value in (("windows", "127.0.0.1"), ("mac", settings["host"])):
         directory = PRIVATE / name
         directory.mkdir(exist_ok=True)

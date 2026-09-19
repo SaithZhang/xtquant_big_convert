@@ -38,6 +38,12 @@ def test_generated_config_disables_orders_and_bypasses(tmp_path, monkeypatch):
     monkeypatch.setattr(package, "STAGE", tmp_path / "stage")
     monkeypatch.setattr(package, "load_profile", lambda: {"account_id": "123456"})
     settings, account = package.generate("192.168.1.5")
+    native_config = (package.PRIVATE / "redis.conf").read_text()
+    assert "bind 127.0.0.1 192.168.1.5\n" in native_config
+    assert "port 16379\n" in native_config
+    assert "0.0.0.0" not in native_config
+    assert "protected-mode yes\n" in native_config
+    assert "requirepass " + settings["password"] in native_config
     manifest = package.build(settings, account)
     local = {}
     exec((package.STAGE / "bigqmt_signal_trader_local_config.py").read_text(), local)
