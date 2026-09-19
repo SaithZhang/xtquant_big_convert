@@ -1,5 +1,7 @@
 # xtquant_big_convert
 
+> 银河测试客户端二次开发：能力与后续方向见 [实测能力报告](docs/GALAXY_CAPABILITY_REPORT.md)，本机部署、验收及同步上游步骤见 [FORK.md](FORK.md)。银河适配位于 `extensions/galaxy_sim/`；以下保留上游说明。
+
 [![PyPI](https://img.shields.io/pypi/v/xtquant-big-convert.svg)](https://pypi.org/project/xtquant-big-convert/)
 [![Python](https://img.shields.io/pypi/pyversions/xtquant-big-convert.svg)](https://pypi.org/project/xtquant-big-convert/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

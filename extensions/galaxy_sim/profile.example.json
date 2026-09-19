@@ -1,0 +1,6 @@
+{
+  "account_id": "YOUR_NUMERIC_SIM_ACCOUNT",
+  "account_type": "STOCK",
+  "simulation": true,
+  "allow_order_methods": false
+}
