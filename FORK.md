@@ -1,111 +1,131 @@
-# 银河 QMT 二次开发入口
+# Galaxy fork：package + Redis LAN
 
-本目录现在是 [SaithZhang/xtquant_big_convert](https://github.com/SaithZhang/xtquant_big_convert) 的真实 Git 工作区，开发分支 `market-gateway`。`origin` 指向自己的 fork，`upstream` 指向 [litaolemo/xtquant_big_convert](https://github.com/litaolemo/xtquant_big_convert)。当前基线 `c163f561694d23853c0e84aa3e03ca18612dfb1e`，版本 0.3.49。银河开发代码与能力报告在 `market-gateway` 分支维护。
+## 定位与分支
 
-上游 `src/`、`tools/` 和原 README 保留原样。银河适配集中在 `extensions/galaxy_sim/`，只负责配置、构建、少量生命周期适配和验收。不要直接修改生成的大文件。
+上游 `litaolemo/xtquant_big_convert` 提供 QMT API 适配、xtdata/xt_trader、Redis/ZMQ RPC、订阅和通用修复。本 fork 只维护银河差异、部署、能力验收和跨平台接入；监控、策略、股票池、预警、Agent 属于其他业务仓库。
 
-当前完整能力、实测明细及后续方向见 [能力报告](docs/GALAXY_CAPABILITY_REPORT.md)。L2 当前无权限，不纳入开发目标。
+- upstream 基线：`c163f561694d23853c0e84aa3e03ca18612dfb1e`，0.3.49（本次 fetch 后未发现更新）。
+- 长期分支：`market-gateway`；本次从它创建 `feat/redis-package-lan`，未合并。
+- `main` 保持 upstream 镜像，本次不修改。
+- 源码部署来自当前 checkout；`src/bigqmt_signal_trader/` 没有修改。`deploy.ps1` 拒绝部署未提交的工作区。
 
-## 当前架构
+## 为什么仍要打开大 QMT
+
+上游和本 fork 都需要已登录的大 QMT 客户端持续运行策略：ContextInfo 和注入 API 由客户端提供。单独运行它自带的 pythonw.exe 并不能连接这些 API。
+
+2 万多行只是上游把模块打包成单文件的分发方式，不是业务代码必须复制的内容。现在改用 package：驱动模块部署在 QMT 的 python 目录，编辑器仅加载约 400 行的上游入口加 17 行银河生命周期适配。外部 Mac/Windows/Linux 程序只安装 SDK。
 
 ```text
-外部 Python：上游 BigQmtRpcClient / BigQmtXtData
-    │ ZMQ RPC  tcp://127.0.0.1:18689
-    ▼
-BIGQMT_GALAXY_SIM（上游无 Redis 单文件入口 + 银河小补丁）
-    │ QMT init / adjust / handlebar 回调处理请求
-    ▼
-ContextInfo / QMT 注入函数
-
-行情订阅与成交回报：上游 PUB/SUB，127.0.0.1:18690
+业务 Python：configure() / xtdata / xt_trader
+                │ 上游 Redis RPC 与订阅
+Windows Docker Redis（认证 + 指定主机地址 + 私有子网防火墙）
+                │
+大 QMT 内 GALAXY_REDIS_RUN → checkout 部署的 package → ContextInfo
 ```
 
-复用上游的通信协议、JSON 特殊对象转换、行情提供器、股票列表、历史下载、订阅管理、交易及成交回报接口。没有 Redis 服务、数据库或 Web UI。传输保留上游 `ok/data/error` 响应；上游 Python 客户端将成功响应还原成数据，错误抛异常。
+Redis 只做传输，关闭磁盘持久化。QMT 和 Docker 都必须运行。SDK 新项目优先显式导入，旧 `from xtquant import xtdata` shim 保留但不推荐与官方 xtquant 混装。
 
-本机配置已按用户要求开启模拟交易 RPC，**没有提交或撤销任何委托**。`simulation` 是使用者声明，软件不能仅凭该字段验证券商账户是否真的为模拟账户。公开示例仍默认关闭交易，实际账号只在 `.local/galaxy_sim.json` 和忽略的生成文件内，不包含密码。
+## Windows 部署与运行
 
-银河补丁仅做三件事：捕获当前策略注入的函数并将 `download_history_data` 映射到上游的 `down_history_data`；关闭上游后台 ContextInfo 预热；提供 `stop` 清理回调。RPC 接收和执行均使用上游无后台线程模式，由 QMT 回调驱动，避免网络线程直接访问 ContextInfo。
-
-## 本机操作
-
-1. 在 `D:\work\market\BigQmtGateway` 打开 PowerShell。本机已经创建 `.venv` 并安装上游 SDK、测试依赖和 pandas。新机器初始化：
-
-   ```powershell
-   py -3.12 -m venv .venv
-   .\.venv\Scripts\python.exe -m pip install -e '.[dev]' 'pandas>=2,<3'
-   New-Item -ItemType Directory .local -Force
-   Copy-Item extensions\galaxy_sim\profile.example.json .local\galaxy_sim.json
-   ```
-
-   将示例的 `account_id` 改为 QMT「系统设置 → 账号管理」中的数字资金账号，普通股票使用 `STOCK`。不使用登录名称，不填密码。`allow_order_methods` 控制交易 RPC；本机私有配置已设为 `true`。
-
-2. 构建并部署：
-
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File .\deploy.ps1
-   ```
-
-   生成 `build\BIGQMT_GALAXY_SIM.py`，复制到 `D:\银河证券QMT测试 - 交易终端\python\BIGQMT_GALAXY_SIM.py`，校验 SHA256。该脚本不覆盖已有不同内容文件；升级时先在 QMT 停止策略，将原来的 **BIGQMT_GALAXY_SIM.py** 改名备份，再重新部署。不要改动银河自带文件。生成文件包含本地账号，不要提交 Git 或分享。
-
-3. 在你截图中的「策略编辑器」，新建 Python 策略 `BIGQMT_GALAXY_SIM`，导入上述文件，或将整个文件内容粘贴进去并保存。不要把文件当普通 Python 程序运行。
-
-4. **不需要新建模拟交易实例**。本机旧网关和新 ZMQ 网关均已在编辑器「运行」方式完成行情验收。先停止旧策略，然后点击新策略的「编译」和「运行」，不是「回测」。不要勾选 **原生python / 独立 Python 进程**。
-
-5. 日志出现 `[GalaxySim] ready RPC=127.0.0.1:18689 ... orders=True` 表示入口启动完成；外部验收通过才代表行情通路可用。
-
-6. 外部验收：
-
-   ```powershell
-   cd D:\work\market\BigQmtGateway
-   python test_gateway.py
-   ```
-
-   脚本自动使用本目录 `.venv`，依次验证 ping、上游 capabilities、沪深 A 股名单、002463.SZ 最近 10 根日 K、20 根 5m K，并打印各项耗时和 QMT 原始时间戳。不开自动下载、不发委托。上游 `probe_capabilities` 会附带只读的账户/信用接口探测；脚本不打印账号、资产或持仓。断开时首个 ping 超时 1.5 秒并退出，提示 `Big QMT Gateway is not running`。
-
-7. 停止：在新策略编辑器点击「停止」。应看到 `[GalaxySim] stopped`，两端口释放。不需要关闭整个 QMT。
-
-## 外部代码复用
-
-```python
-from extensions.galaxy_sim.config import create_client
-from bigqmt_signal_trader.xtquant_compat import BigQmtXtData
-
-client = create_client()
-xtdata = BigQmtXtData(client)
-bars = client.call("get_market_data_ex", {
-    "stock_list": ["002463.SZ"], "period": "5m", "count": 20,
-    "field_list": ["open", "high", "low", "close", "volume", "amount"],
-    "dividend_type": "none"
-}, use_formula=False)
-print(bars)
-```
-
-使用上游 `BigQmtXtData` 的订阅和取消订阅接口即可继续开发监控；本机关闭 FormulaServer 旁路和行情缓存，便于验收真实策略连接。上游 API 详细说明见 [README](README.md)。不要在上游代码外再造一套通信或 MiniQMT 兼容层。
-
-## 合并作者后续更新
+本机已有 `.venv`、Docker Desktop 和 QMT 自带 redis 3.5.3。客户端使用上游 `[redis]` extra。新机器需要先安装 Docker Desktop 并启用 Linux containers，再创建 Python 3.12 venv：
 
 ```powershell
-git status
-# 先检查并提交自己的代码；确认 .local、build 和账号未进入提交。
-git fetch upstream
-git log --oneline HEAD..upstream/main
-git merge upstream/main
-.\.venv\Scripts\python.exe -m extensions.galaxy_sim.build
-.\.venv\Scripts\python.exe -m pytest -q extensions/galaxy_sim/test_config.py tests/test_single_file_build.py tests/bigqmt_signal_trader/test_single_file_zmq_bind.py
-.\.venv\Scripts\python.exe -m extensions.galaxy_sim.smoke_embedded build/BIGQMT_GALAXY_SIM.py
-# 部署、在 QMT 停止后重新加载，再运行真实验收。
-python test_gateway.py
+.\.venv\Scripts\python.exe -m pip install -e '.[redis,dev]' 'pandas>=2,<3'
+# 第一次生成私有配置；LAN_IPV4 替换成本机可信局域网地址
+.\.venv\Scripts\python.exe -m extensions.galaxy_sim.redis_package --host LAN_IPV4
+# 管理员 PowerShell，仅这一项需要管理员
+powershell -ExecutionPolicy Bypass -File extensions\galaxy_sim\redis-lan.ps1 -Mode Firewall
+# 普通 PowerShell
+powershell -ExecutionPolicy Bypass -File extensions\galaxy_sim\redis-lan.ps1 -Mode Lan
+powershell -ExecutionPolicy Bypass -File deploy.ps1
 ```
 
-离线 smoke 使用合成 ContextInfo，只用于无交易地验证入口加载、线程路由、序列化和停止释放端口；运行前停止真实新网关，避免占用相同端口。构建器会检查上游配置结构变化并报错，便于升级时发现不兼容。没有自动拉取、自动合并或自动部署任务。
+首次资金账号来自既有 `.local/galaxy_sim.json`（格式见 `extensions/galaxy_sim/profile.example.json`）。不需要登录密码。新 Redis package 无论旧 profile 如何配置，始终 `rpc_allow_order_methods=False`。
 
-## 能力边界及下一步
+部署结构：
 
-本次验证（2026-09-19）：40 项相关上游/银河回归测试通过，旧 HTTP 的 11 项离线测试通过；生成入口在 Python 3.12.10 与银河内置 Python 3.6.8 均通过合成 ContextInfo + 真实 ZMQ 集成测试，覆盖策略线程执行与停止释放端口。新文件已复制到银河 `python` 目录并通过 SHA256 校验。随后已通过 QMT 编辑器将正确按 GBK 解码的源码粘贴到「新建策略文件1」，保存、编译并运行；2026-09-19 19:38 外部真实验收全部通过：ping 0.043 秒、capabilities 4.478 秒、沪深 A 股 5224 只、日 K 10 根、5m K 20 根，总耗时 4.996 秒。日 K 最后时间 20260918，5m 最后时间 20260918150000。未下单、未撤单、未触发下载。原生 Python 保持未勾选。复制源码时必须先按 GBK 正确解码，不能将按 UTF-8 误读后已乱码的文本贴回编辑器。损坏策略的原文件已备份至 `.local/broken-editor-before-repair.py.bak`。
+```text
+<QMT>\python\
+  bigqmt_signal_trader\                     # 当前 checkout 的上游原文件
+  bigqmt_signal_trader_strategy.py
+  bigqmt_signal_trader_redis_rpc_runtime.py
+  BIGQMT_REDIS_DRYRUN.py                     # 上游入口原文件
+  BIGQMT_GALAXY_REDIS.py                     # 原入口 + 最小 overlay
+  bigqmt_signal_trader_local_config.py       # 私有生成配置
+  galaxy-package-manifest.json              # commit、dirty 状态、SHA256
+```
 
-- **旧 HTTP 入口已实机验证**：沪深 A 股 5224 只、002463.SZ 日 K 10 根和 5m K 20 根；该结果属于旧入口，不等于新 ZMQ 入口已实机验证。
-- **新入口复用现成功能**：行情、订阅、账户查询、模拟交易 RPC 和成交回报。是否能在当前银河策略运行模式下完成订阅和委托，须分别验收；配置已开启不代表委托已成功。
-- 当前银河暴露单笔历史下载函数；补丁已桥接，尚未进行真实下载验证。上游 `download_history_data2` 可能逐股票调用单笔下载，不能据此宣称银河有原生批量函数。异步下载任务关闭。1m / 15m / 60m 已分别实测 20 根 K 线并通过数据校验；盘中更新仍待验收。
-- 后续 55 日线和 15 分钟红 K 监控放在外部 Python：复用行情订阅，在有时间戳的新数据上算规则。实现前明确 55 日线是否排除当日未完成日 K、红 K 是盘中形成还是收盘确认，以及提醒去重和午休时段。当前没有实现报警或自动交易规则。
+部署器先检查所有冲突再复制，不覆盖未知文件或被 GUI 改过的文件；升级自己的文件会在 `.local/redis-lan/backups/` 备份。升级前先停止 QMT 策略，部署后重新加载。不要手改生成包或 manifest。
 
-旧 HTTP 源码保留在 `qmt/`、`client/`；`python test_gateway.py --legacy` 可复测，`--self-test` 可运行原 11 个离线测试。旧部署使用 `deploy.ps1 -Legacy`。原说明保存在 [GALAXY_MARKET_GATEWAY.md](docs/GALAXY_MARKET_GATEWAY.md)，最初五文件备份位于忽略目录 `.local/legacy-mvp-20260919.zip`。
+QMT「模型研究 → 策略编辑器」中右键「PYTHON模型指标 → 新建模型 → Python模型」，命名 `GALAXY_REDIS_RUN`。把 `build/redis-package/BIGQMT_GALAXY_REDIS.py` 的文本放进编辑器，保存后点「运行」。**不要勾原生 python/独立 Python 进程，不点回测。** 这台银河终端已验证编辑器运行能注入 API，不需要新建模拟交易实例。日志有 `[GalaxyPackage] ready transport=redis orders=False commit=...`；外部测试通过才代表通路可用。
+
+不要让 GUI 保存覆盖部署器管理的 `BIGQMT_GALAXY_REDIS.py`；QMT 自己保存的策略可能是专有编码，因此使用独立的 `GALAXY_REDIS_RUN` 名称。
+
+```powershell
+.\.venv\Scripts\python.exe test_redis_sdk.py --report .local\redis-lan\windows-results.json
+```
+
+原 `python test_gateway.py` 仍检查 **legacy ZMQ**，不用于验收 Redis。停止 Redis 策略：编辑器点「停止」，应有 `[GalaxyPackage] stopped`；只停传输容器可执行 `redis-lan.ps1 -Mode Stop`。
+
+## LAN 配置边界
+
+私有配置都在 `.local/redis-lan/`，包括 `settings.json`、随机强密码、Redis 配置、Windows/Mac 客户端配置及备份。不要提交或公开发送此目录。QMT 本地配置也包含认证信息。
+
+Redis 使用官方 `redis:7.4-alpine` Docker 镜像；实际拉取 digest 记录在私有 `image-digest.json`。主机发布到 loopback 和**具体 LAN IPv4**，端口 16379；不发布主机 `0.0.0.0` 或 IPv6。容器内部绑定所有接口是 Docker 转发所需，不等于主机公网发布。
+
+防火墙规则 `BigQmtGalaxyRedisLAN` 只允许当前网卡子网、Private profile、指定本机地址和 TCP 端口。默认入站防火墙必须保持启用，勿添加其他宽泛放行规则；路由器不得做公网端口转发，勿经公网隧道公开服务。Redis AUTH 未加密，仅用于用户指定的可信局域网。IP/网段改变后需重新审查私有配置、重建规则和容器，不能盲目延用旧配置。`-Mode Local` 可退回仅 loopback 发布。
+
+参考：[Redis Docker 部署](https://redis.io/docs/latest/operate/oss_and_stack/install/install-stack/docker/)、[Docker 指定主机 IP 发布端口](https://docs.docker.com/engine/network/port-publishing/)。
+
+## Galaxy patch 审查
+
+| 旧适配 | package 决策 |
+| --- | --- |
+| 手动捕获 QMT injected globals | 移除重复逻辑；上游入口调用 canonical capture |
+| download_history_data → down_history_data | 移除重复逻辑；上游 RPC 已支持两种命名及 batch 回退 |
+| 禁止后台 ContextInfo 预热 | 保留：上游 runtime 未转发此配置；overlay 在 init 前设置 warm_context_data=False |
+| stop 清理 | 保留：调用上游 reset_app；不上游复制清理实现 |
+
+新 patch 是 `extensions/galaxy_sim/package_overlay.py`，不改驱动目录。网络接收使用上游 Redis 后台接收线程，`rpc_process_in_listener=False`，QMT 回调处理请求；关闭 FormulaServer 旁路、行情缓存、自动下载任务。旧 `qmt_overlay.py` 仅由 legacy 构建器使用，保留已验证回滚产物，不把它接到 package。
+
+## 2026-09-19 Windows 实测
+
+在银河 2.1.26.0、内置 Python 3.6.8 的**真实策略**中完成（非 mock）：
+
+| 检查 | 结果 |
+| --- | --- |
+| Redis 认证、RPC ping | PASS |
+| get_deployment_info | PASS：0.3.49 / Python 3.6.8；路径核对部署 package |
+| 000001.SZ 五档快照 | PASS；最后交易日快照，不标为周末实时成交 |
+| 1d / 5m / 15m / 60m K 线 | PASS，每项 10 根，末端 2026-09-18 |
+| 沪深 A 股名单 | PASS，5224 项 |
+| 账户查询 | 调用 PASS，资金内容 UNKNOWN；不能视为完整账户验收 |
+| 持仓查询 | 调用 PASS，空列表；不证明账户无持仓 |
+| subscribe_whole_quote / unsubscribe | 注册、初始快照、清理 PASS；持续推送 PENDING_TRADING_SESSION |
+| 本机经 LAN 地址运行同一 SDK | PASS；不替代跨机器防火墙验收 |
+| Mac 实机 | PENDING_MANUAL_VERIFICATION |
+
+没有测试交易写操作；L2 无权限，本次不测。模拟客户端与策略编辑器的账户上下文限制需要后续单独诊断；不得用 0 补齐未知资产字段。私有逐项耗时报告见 `.local/redis-lan/windows-results.json`。
+
+回归验证：90 个测试及 15 个 subtests 通过（Galaxy 配置/部署保护、Redis RPC、关闭清理、客户端配置优先级、订阅流程）。两处 Redis 主机发布地址均验证拒绝匿名/错误密码；Windows 有效防火墙配置为启用且默认入站 Block。已核对运行 package 路径及部署文件 SHA256。跨机器访问仍需 Mac 实机验收。
+
+## Mac 与其他业务项目
+
+见 [Mac 最短验收](docs/GALAXY_REDIS_MAC.md)。Mac 无需安装或启动 QMT，只需 Windows 端保持客户端和策略运行。
+
+```python
+from bigqmt_signal_trader.xtquant_compat import configure, xtdata, xt_trader
+configure()  # 读取本机 private client config
+print(xtdata.get_full_tick(['000001.SZ']))
+print(xtdata.get_market_data_ex(stock_list=['000001.SZ'], period='5m', count=10))
+```
+
+业务不直接访问 Redis key、不构造 RPC payload、不复制驱动源码。内部稳定后再打 `galaxy-v0.1.0` 等 tag，通过固定 tag 安装；本次不提前打稳定标签。基础设施验收脚本的 Redis PING 仅检查网络，不是业务接口。
+
+## 回滚与跟进上游
+
+旧 `BIGQMT_GALAXY_SIM` / 单文件构建器 / ZMQ 测试全部保留，未删除。停止 `GALAXY_REDIS_RUN`，在旧策略页运行 ZMQ 入口即可回到旧链路；不要同时运行两个服务处理同一账号。**原 legacy 私有配置曾允许模拟交易 RPC，回滚前需设 `.local/galaxy_sim.json` 的 allow_order_methods=false，重新构建并粘贴至旧策略保存**，保持当前只读要求。`python -m extensions.galaxy_sim.build` 构建；`deploy.ps1 -ZmqRollback` 仍执行原有拒绝覆盖策略，已有不同文件时用生成文本在 GUI 更新，不覆盖券商文件。更早 HTTP MVP 用 `deploy.ps1 -Legacy`。
+
+旧版操作记录保留于 [ZMQ 历史说明](docs/GALAXY_ZMQ_LEGACY.md)，其中旧配置和路径描述仅代表迁移前状态。
+
+更新顺序：fetch upstream → 检查上游变化 → 在功能分支合并 upstream/main → 审查剩余 overlay → 测试 → commit → 停策略/部署/重新加载 → Windows 实测 → Mac 验收。仅在验收后考虑合并回 market-gateway；不要在 main 开发银河功能。

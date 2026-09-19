@@ -1,9 +1,21 @@
 ﻿[CmdletBinding()]
 param(
     [string]$QmtRoot = 'D:\银河证券QMT测试 - 交易终端',
-    [switch]$Legacy
+    [switch]$Legacy,
+    [switch]$ZmqRollback,
+    [string]$LanAddress
 )
 $ErrorActionPreference = 'Stop'
+if (-not $Legacy -and -not $ZmqRollback) {
+    Push-Location $PSScriptRoot
+    try {
+        $arguments = @('-m', 'extensions.galaxy_sim.redis_package', '--qmt-root', $QmtRoot)
+        if ($LanAddress) { $arguments += @('--host', $LanAddress) }
+        & "$PSScriptRoot\.venv\Scripts\python.exe" @arguments
+        if ($LASTEXITCODE -ne 0) { throw 'Redis package deployment failed.' }
+    } finally { Pop-Location }
+    return
+}
 function Get-Sha256([string]$Path) {
     $algorithm = [Security.Cryptography.SHA256]::Create()
     $stream = [IO.File]::OpenRead($Path)
